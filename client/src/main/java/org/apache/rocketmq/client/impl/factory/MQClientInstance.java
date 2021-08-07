@@ -84,6 +84,9 @@ import org.apache.rocketmq.remoting.exception.RemotingException;
 import org.apache.rocketmq.remoting.netty.NettyClientConfig;
 import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 
+/**
+ * RocketMQ客户端中顶层类
+ * */
 public class MQClientInstance {
     private final static long LOCK_TIMEOUT_MILLIS = 3000;
     private final InternalLogger log = ClientLogger.getLog();
@@ -224,6 +227,7 @@ public class MQClientInstance {
     public void start() throws MQClientException {
 
         synchronized (this) {
+            //此处serviceState为MQClientInstance自己维护
             switch (this.serviceState) {
                 case CREATE_JUST:
                     this.serviceState = ServiceState.START_FAILED;
@@ -232,14 +236,16 @@ public class MQClientInstance {
                         this.mQClientAPIImpl.fetchNameServerAddr();
                     }
                     // Start request-response channel
+                    //启动请求响应通道，mQClientAPIImpl是类MQClientAPIImpl的实例，封装了客户端与broker通信的方法
                     this.mQClientAPIImpl.start();
                     // Start various schedule tasks
+                    //启动各种定时任务, 包括与broker之间的定时心跳，定时与NameServer同步数据等任务
                     this.startScheduledTask();
-                    // Start pull service
+                    // Start pull service 启动拉取服务
                     this.pullMessageService.start();
-                    // Start rebalance service
+                    // Start rebalance service 启动rebalance服务
                     this.rebalanceService.start();
-                    // Start push service
+                    // Start push service 启动producer服务
                     this.defaultMQProducer.getDefaultMQProducerImpl().start(false);
                     log.info("the client factory [{}] start OK", this.clientId);
                     this.serviceState = ServiceState.RUNNING;

@@ -184,7 +184,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     }
 
     public void start(final boolean startFactory) throws MQClientException {
+        //状态模式，使用成员变量serviceState管理自身服务状态
         switch (this.serviceState) {
+            //中间状态，
             case CREATE_JUST:
                 this.serviceState = ServiceState.START_FAILED;
 
@@ -193,10 +195,11 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 if (!this.defaultMQProducer.getProducerGroup().equals(MixAll.CLIENT_INNER_PRODUCER_GROUP)) {
                     this.defaultMQProducer.changeInstanceNameToPID();
                 }
-
+                //通过单例模式的MQClientManager获取MQClientInstance的示例mQClientFactory
                 this.mQClientFactory = MQClientManager.getInstance().getOrCreateMQClientInstance(this.defaultMQProducer, rpcHook);
-
+                //将自己注册到mQClientFactory
                 boolean registerOK = mQClientFactory.registerProducer(this.defaultMQProducer.getProducerGroup(), this);
+                //注册失败，维持中间状态CREATE_JUST，并抛出MQClientException
                 if (!registerOK) {
                     this.serviceState = ServiceState.CREATE_JUST;
                     throw new MQClientException("The producer group[" + this.defaultMQProducer.getProducerGroup()
@@ -205,7 +208,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 }
 
                 this.topicPublishInfoTable.put(this.defaultMQProducer.getCreateTopicKey(), new TopicPublishInfo());
-
+                //启动mQClientFactory
                 if (startFactory) {
                     mQClientFactory.start();
                 }
@@ -765,7 +768,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     checkForbiddenContext.setUnitMode(this.isUnitMode());
                     this.executeCheckForbiddenHook(checkForbiddenContext);
                 }
-
+                //组装发送消息上下文SendMessageContext
                 if (this.hasSendMessageHook()) {
                     context = new SendMessageContext();
                     context.setProducer(this);
@@ -786,7 +789,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     }
                     this.executeSendMessageHookBefore(context);
                 }
-
+                //组装发送消息的头SendMessageRequestHeader
                 SendMessageRequestHeader requestHeader = new SendMessageRequestHeader();
                 requestHeader.setProducerGroup(this.defaultMQProducer.getProducerGroup());
                 requestHeader.setTopic(msg.getTopic());
@@ -815,6 +818,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 }
 
                 SendResult sendResult = null;
+                //根据发送类型的不同，调用MQClientAPIImpl.sendMessage方法，完成后续序列化和网络传输等操作，获取到sendResult。oneway方式不需要sendResult.
                 switch (communicationMode) {
                     case ASYNC:
                         Message tmpMessage = msg;
@@ -1131,6 +1135,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         return this.sendSelectImpl(msg, selector, arg, CommunicationMode.SYNC, null, timeout);
     }
 
+    /**
+     * 选定要发送的队列，然后调用sendKernelImpl()发送消息
+     * */
     private SendResult sendSelectImpl(
         Message msg,
         MessageQueueSelector selector,
@@ -1145,13 +1152,14 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         TopicPublishInfo topicPublishInfo = this.tryToFindTopicPublishInfo(msg.getTopic());
         if (topicPublishInfo != null && topicPublishInfo.ok()) {
             MessageQueue mq = null;
+            //选择将消息发送到哪个队列中
             try {
                 List<MessageQueue> messageQueueList =
                     mQClientFactory.getMQAdminImpl().parsePublishMessageQueues(topicPublishInfo.getMessageQueueList());
                 Message userMessage = MessageAccessor.cloneMessage(msg);
                 String userTopic = NamespaceUtil.withoutNamespace(userMessage.getTopic(), mQClientFactory.getClientConfig().getNamespace());
                 userMessage.setTopic(userTopic);
-
+                //选择发送哪个队列，由MessageQueueSelector.select()决定。在这里使用了策略模式
                 mq = mQClientFactory.getClientConfig().queueWithNamespace(selector.select(messageQueueList, userMessage, arg));
             } catch (Throwable e) {
                 throw new MQClientException("select message queue threw exception.", e);
@@ -1162,6 +1170,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 throw new RemotingTooMuchRequestException("sendSelectImpl call timeout");
             }
             if (mq != null) {
+                //选择队列后，执行sendKernelImpl()发送
                 return this.sendKernelImpl(msg, mq, communicationMode, sendCallback, null, timeout - costTime);
             } else {
                 throw new MQClientException("select message queue return null.", null);
@@ -1198,6 +1207,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         final SendCallback sendCallback, final long timeout)
         throws MQClientException, RemotingException, InterruptedException {
         final long beginStartTime = System.currentTimeMillis();
+        //使用asyncSenderExecutor线程池
         ExecutorService executor = this.getAsyncSenderExecutor();
         try {
             executor.submit(new Runnable() {
@@ -1207,6 +1217,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     if (timeout > costTime) {
                         try {
                             try {
+                                //异步发送中，使用线程池提交sendSelectImpl； 同步发送和单向发送，直接在方法体中调用
                                 sendSelectImpl(msg, selector, arg, CommunicationMode.ASYNC, sendCallback,
                                     timeout - costTime);
                             } catch (MQBrokerException e) {
